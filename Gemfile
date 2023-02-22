@@ -129,7 +129,6 @@ gem 'execjs'
 gem 'typhoeus', '~> 1.3.1'
 gem 'uglifier', '~> 2.7.2'
 gem 'bootsnap', require: false
-gem 'puma'
 
 group :development do
   gem 'better_errors'
