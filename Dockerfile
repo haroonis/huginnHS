@@ -33,3 +33,58 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN corepack enable
 
 # Prepare Huginn build environment
+COPY docker/scripts/prepare /scripts/
+RUN sed -i 's/git-core/git/' /scripts/prepare \
+ && sed -i 's/apt-get purge -y python3\*/# removed python3 purge/' /scripts/prepare \
+ && /scripts/prepare
+
+COPY docker/multi-process/scripts/standalone-packages /scripts/
+RUN /scripts/standalone-packages
+
+WORKDIR /app
+
+# Install Ruby gems
+COPY ["Gemfile", "Gemfile.lock", "/app/"]
+COPY lib/gemfile_helper.rb /app/lib/
+COPY vendor/gems/ /app/vendor/gems/
+
+RUN umask 002 && git init && \
+    export RAILS_ENV=production APP_SECRET_TOKEN=secret DATABASE_ADAPTER=mysql2 ON_HEROKU=true && \
+    bundle config set --local path vendor/bundle && \
+    bundle config set --local without 'test development' && \
+    bundle install -j 4
+
+# Copy full app
+COPY ./ /app/
+
+ARG OUTDATED_DOCKER_IMAGE_NAMESPACE=false
+ENV OUTDATED_DOCKER_IMAGE_NAMESPACE ${OUTDATED_DOCKER_IMAGE_NAMESPACE}
+
+# Precompile assets
+RUN umask 002 && \
+    RAILS_ENV=production APP_SECRET_TOKEN=secret DATABASE_ADAPTER=mysql2 ON_HEROKU=true \
+    bundle exec rake assets:clean assets:precompile && \
+    chmod g=u /app/.env.example /app/Gemfile.lock /app/config/ /app/tmp/
+
+EXPOSE 3000
+
+# Supervisor configs
+COPY docker/multi-process/scripts/supervisord.conf /etc/supervisor/
+COPY ["docker/multi-process/scripts/bootstrap.conf", \
+      "docker/multi-process/scripts/foreman.conf", \
+      "docker/multi-process/scripts/mysqld.conf", "/etc/supervisor/conf.d/"]
+COPY ["docker/multi-process/scripts/bootstrap.sh", \
+      "docker/multi-process/scripts/foreman.sh", \
+      "docker/multi-process/scripts/init", \
+      "docker/scripts/setup_env", "/scripts/"]
+
+CMD ["/scripts/init"]
+
+# Non-root user
+ARG UID=1001
+RUN useradd -u "$UID" -g 0 -d /app -s /sbin/nologin -c "default user" default
+
+USER $UID
+ENV HOME /app
+
+VOLUME /var/lib/mysql
