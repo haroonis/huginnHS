@@ -1,6 +1,6 @@
 FROM ruby:3.2-slim-bookworm
 
-# Set environment variables
+# Environment variables
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     DEBIAN_FRONTEND=noninteractive \
@@ -13,7 +13,7 @@ ENV LANG=C.UTF-8 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
-    libmysqlclient-dev \
+    default-libmysqlclient-dev \
     libsqlite3-dev \
     zlib1g-dev \
     libyaml-dev \
@@ -29,7 +29,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     locales \
     tzdata \
-    nodejs \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js (via NodeSource)
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
 
 # Enable Corepack for Yarn
