@@ -1,8 +1,10 @@
 FROM ruby:3.2-slim
 
 # Install Ruby, RubyGems, Bundler, and dependencies
-RUN apt-get update && apt-get install -y apt-transport-https ca-certificates \
-  apt-get install -y software-properties-common
+RUN apt-get update && apt-get install -y \
+  apt-transport-https \
+  ca-certificates \
+  software-properties-common \
   build-essential \
   libpq-dev \
   nodejs \
