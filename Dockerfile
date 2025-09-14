@@ -1,4 +1,4 @@
-FROM ubuntu:18.04
+FROM ruby:3.2-slim
 
 # Install Ruby, RubyGems, Bundler, and dependencies
 RUN apt-get update && apt-get install -y \
