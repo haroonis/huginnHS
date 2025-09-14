@@ -9,6 +9,9 @@ ENV LANG=C.UTF-8 \
     DATABASE_ADAPTER=mysql2 \
     ON_HEROKU=true
 
+RUN sed -i 's/libmysqlclient-dev/libmariadb-dev libmariadb-dev-compat/' /scripts/prepare \
+ && /scripts/prepare
+
 # Install essential system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
