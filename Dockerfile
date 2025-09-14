@@ -1,5 +1,15 @@
 FROM ubuntu:18.04
 
+# Install Ruby, RubyGems, Bundler, and dependencies
+RUN apt-get update && apt-get install -y \
+  ruby-full \
+  ruby-bundler \
+  build-essential \
+  libpq-dev \
+  nodejs \
+  yarn \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY docker/scripts/prepare /scripts/
 RUN /scripts/prepare
 
