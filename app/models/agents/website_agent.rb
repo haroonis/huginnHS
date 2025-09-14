@@ -14,7 +14,7 @@ module Agents
     UNIQUENESS_LOOK_BACK = 200
     UNIQUENESS_FACTOR = 3
 
-    description <<-MD
+    description <<~MD
       The Website Agent scrapes a website, XML document, or JSON feed and creates Events based on the results.
 
       Specify a `url` and select a `mode` for when to create Events based on the scraped data, either `all`, `on_change`, or `merge` (if fetching based on an Event, see below).
@@ -62,7 +62,9 @@ module Agents
 
       Beware that when parsing an XML document (i.e. `type` is `xml`) using `xpath` expressions, all namespaces are stripped from the document unless the top-level option `use_namespaces` is set to `true`.
 
-      For extraction with `array` set to true, all matches will be extracted into an array. This is useful when extracting list elements or multiple parts of a website that can only be matched with the same selector.
+      For extraction with `raw` set to true, each value will be returned as is without any conversion instead of stringifying them.  This is useful when you want to extract a number, a boolean value, or an array of strings.
+
+      For extraction with `single_array` set to true, all matches will be extracted into an array. This is useful when extracting list elements or multiple parts of a website that can only be matched with the same selector.
 
       # Scraping JSON
 
@@ -224,37 +226,42 @@ module Agents
 
     def default_options
       {
-          'expected_update_period_in_days' => "2",
-          'url' => "https://xkcd.com",
-          'type' => "html",
-          'mode' => "on_change",
-          'extract' => {
-            'url' => { 'css' => "#comic img", 'value' => "@src" },
-            'title' => { 'css' => "#comic img", 'value' => "@alt" },
-            'hovertext' => { 'css' => "#comic img", 'value' => "@title" }
-          }
+        'expected_update_period_in_days' => "2",
+        'url' => "https://xkcd.com",
+        'type' => "html",
+        'mode' => "on_change",
+        'extract' => {
+          'url' => { 'css' => "#comic img", 'value' => "@src" },
+          'title' => { 'css' => "#comic img", 'value' => "@alt" },
+          'hovertext' => { 'css' => "#comic img", 'value' => "@title" }
+        }
       }
     end
 
     def validate_options
       # Check for required fields
-      errors.add(:base, "either url, url_from_event, or data_from_event are required") unless options['url'].present? || options['url_from_event'].present? || options['data_from_event'].present?
-      errors.add(:base, "expected_update_period_in_days is required") unless options['expected_update_period_in_days'].present?
+      errors.add(:base,
+                 "either url, url_from_event, or data_from_event are required") unless options['url'].present? || options['url_from_event'].present? || options['data_from_event'].present?
+      errors.add(:base,
+                 "expected_update_period_in_days is required") unless options['expected_update_period_in_days'].present?
       validate_extract_options!
       validate_template_options!
       validate_http_success_codes!
 
       # Check for optional fields
       if options['mode'].present?
-        errors.add(:base, "mode must be set to on_change, all or merge") unless %w[on_change all merge].include?(options['mode'])
+        errors.add(:base, "mode must be set to on_change, all or merge") unless %w[on_change all
+                                                                                   merge].include?(options['mode'])
       end
 
       if options['expected_update_period_in_days'].present?
-        errors.add(:base, "Invalid expected_update_period_in_days format") unless is_positive_integer?(options['expected_update_period_in_days'])
+        errors.add(:base,
+                   "Invalid expected_update_period_in_days format") unless is_positive_integer?(options['expected_update_period_in_days'])
       end
 
       if options['uniqueness_look_back'].present?
-        errors.add(:base, "Invalid uniqueness_look_back format") unless is_positive_integer?(options['uniqueness_look_back'])
+        errors.add(:base,
+                   "Invalid uniqueness_look_back format") unless is_positive_integer?(options['uniqueness_look_back'])
       end
 
       validate_web_request_options!
@@ -264,23 +271,24 @@ module Agents
       consider_success = options["http_success_codes"]
       if consider_success.present?
 
-        if (consider_success.class != Array)
+        if consider_success.class != Array
           errors.add(:http_success_codes, "must be an array and specify at least one status code")
-        else
-          if consider_success.uniq.count != consider_success.count
-            errors.add(:http_success_codes, "duplicate http code found")
-          else
-            if consider_success.any?{|e| e.to_s !~ /^\d+$/ }
-              errors.add(:http_success_codes, "please make sure to use only numeric values for code, ex 404, or \"404\"")
-            end
-          end
+        elsif consider_success.uniq.count != consider_success.count
+          errors.add(:http_success_codes, "duplicate http code found")
+        elsif consider_success.any? { |e| e.to_s !~ /^\d+$/ }
+          errors.add(:http_success_codes,
+                     "please make sure to use only numeric values for code, ex 404, or \"404\"")
         end
 
       end
     end
 
     def validate_extract_options!
-      extraction_type = (extraction_type() rescue extraction_type(options))
+      extraction_type = begin
+        extraction_type()
+      rescue StandardError
+        extraction_type(options)
+      end
       case extract = options['extract']
       when Hash
         if extract.each_value.any? { |value| !value.is_a?(Hash) }
@@ -289,6 +297,15 @@ module Agents
           case extraction_type
           when 'html', 'xml'
             extract.each do |name, details|
+              details.each do |name,|
+                case name
+                when 'css', 'xpath', 'value', 'repeat', 'hidden', 'raw', 'single_array'
+                  # ok
+                else
+                  errors.add(:base, "Unknown key #{name.inspect} in extraction details")
+                end
+              end
+
               case details['css']
               when String
                 # ok
@@ -297,7 +314,8 @@ module Agents
                 when String
                   # ok
                 when nil
-                  errors.add(:base, "When type is html or xml, all extractions must have a css or xpath attribute (bad extraction details for #{name.inspect})")
+                  errors.add(:base,
+                             "When type is html or xml, all extractions must have a css or xpath attribute (bad extraction details for #{name.inspect})")
                 else
                   errors.add(:base, "Wrong type of \"xpath\" value in extraction details for #{name.inspect}")
                 end
@@ -318,7 +336,8 @@ module Agents
               when String
                 # ok
               when nil
-                errors.add(:base, "When type is json, all extractions must have a path attribute (bad extraction details for #{name.inspect})")
+                errors.add(:base,
+                           "When type is json, all extractions must have a path attribute (bad extraction details for #{name.inspect})")
               else
                 errors.add(:base, "Wrong type of \"path\" value in extraction details for #{name.inspect}")
               end
@@ -329,11 +348,12 @@ module Agents
               when String
                 begin
                   re = Regexp.new(regexp)
-                rescue => e
+                rescue StandardError => e
                   errors.add(:base, "invalid regexp for #{name.inspect}: #{e.message}")
                 end
               when nil
-                errors.add(:base, "When type is text, all extractions must have a regexp attribute (bad extraction details for #{name.inspect})")
+                errors.add(:base,
+                           "When type is text, all extractions must have a regexp attribute (bad extraction details for #{name.inspect})")
               else
                 errors.add(:base, "Wrong type of \"regexp\" value in extraction details for #{name.inspect}")
               end
@@ -346,7 +366,8 @@ module Agents
                   errors.add(:base, "no named capture #{index.inspect} found in regexp for #{name.inspect})")
                 end
               when nil
-                errors.add(:base, "When type is text, all extractions must have an index attribute (bad extraction details for #{name.inspect})")
+                errors.add(:base,
+                           "When type is text, all extractions must have an index attribute (bad extraction details for #{name.inspect})")
               else
                 errors.add(:base, "Wrong type of \"index\" value in extraction details for #{name.inspect}")
               end
@@ -369,8 +390,7 @@ module Agents
     def validate_template_options!
       template = options['template'].presence or return
 
-      unless Hash === template &&
-             template.each_pair.all? { |key, value| String === value }
+      unless Hash === template && template.each_key.all?(String)
         errors.add(:base, 'template must be a hash of strings.')
       end
     end
@@ -403,7 +423,7 @@ module Agents
         interpolation_context['_response_'] = ResponseDrop.new(response)
         handle_data(response.body, response.env[:url], existing_payload)
       }
-    rescue => e
+    rescue StandardError => e
       error "Error when fetching url: #{e.message}\n#{e.backtrace.join("\n")}"
     end
 
@@ -432,12 +452,12 @@ module Agents
 
       output =
         case extraction_type
-          when 'json'
-            extract_json(doc)
-          when 'text'
-            extract_text(doc)
-          else
-            extract_xml(doc)
+        when 'json'
+          extract_json(doc)
+        when 'text'
+          extract_text(doc)
+        else
+          extract_xml(doc)
         end
 
       num_tuples = output.size or
@@ -485,6 +505,7 @@ module Agents
     end
 
     private
+
     def consider_response_successful?(response)
       response.success? || begin
         consider_success = options["http_success_codes"]
@@ -497,7 +518,7 @@ module Agents
         interpolation_context['_response_'] = ResponseFromEventDrop.new(event)
         handle_data(data, event.payload['url'].presence, existing_payload)
       }
-    rescue => e
+    rescue StandardError => e
       error "Error when handling event data: #{e.message}\n#{e.backtrace.join("\n")}"
     end
 
@@ -557,7 +578,7 @@ module Agents
       if interpolated.key?('use_namespaces')
         boolify(interpolated['use_namespaces'])
       else
-        interpolated['extract'].none? { |name, extraction_details|
+        interpolated['extract'].none? { |_name, extraction_details|
           extraction_details.key?('xpath')
         }
       end
@@ -617,22 +638,63 @@ module Agents
         else
           raise '"css" or "xpath" is required for HTML or XML extraction'
         end
+
         log "Extracting #{extraction_type} at #{xpath || css}"
+
+        expr = extraction_details['value'] || '.'
+
+        handle_float = ->(value) {
+          case
+          when value.nan?
+            'NaN'
+          when value.infinite?
+            if value > 0
+              'Infinity'
+            else
+              '-Infinity'
+            end
+          when value.to_i == value
+            # Node#xpath() returns any numeric value as float;
+            # convert it to integer as appropriate.
+            value.to_i
+          else
+            value
+          end
+        }
+        jsonify =
+          if boolify(extraction_details['raw'])
+            ->(value) {
+              case value
+              when nil, true, false, String, Integer
+                value
+              when Float
+                handle_float.call(value)
+              when Nokogiri::XML::NodeSet
+                value.map(&jsonify)
+              else
+                value.to_s
+              end
+            }
+          else
+            ->(value) {
+              case value
+              when Float
+                handle_float.call(value).to_s
+              else
+                value.to_s
+              end
+            }
+          end
+
         case nodes
         when Nokogiri::XML::NodeSet
-          stringified_nodes  = nodes.map do |node|
-            case value = node.xpath(extraction_details['value'] || '.')
-            when Float
-              # Node#xpath() returns any numeric value as float;
-              # convert it to integer as appropriate.
-              value = value.to_i if value.to_i == value
-            end
-            value.to_s
-          end
-          if boolify(extraction_details['array'])
-            values << stringified_nodes
+          node_values = nodes.map { |node|
+            jsonify.call(node.xpath(expr))
+          }
+          if boolify(extraction_details['single_array'])
+            values << node_values
           else
-            stringified_nodes.each { |n| values << n }
+            node_values.each { |value| values << value }
           end
         else
           raise "The result of HTML/XML extraction was not a NodeSet"
@@ -677,6 +739,7 @@ module Agents
           if @size && @size != size
             raise UnevenSizeError, 'got an uneven size'
           end
+
           @size = size
         end
 
@@ -684,7 +747,7 @@ module Agents
       end
 
       def each
-        @size.times.zip(*@hash.values) do |index, *values|
+        @size.times.zip(*@hash.values) do |_index, *values|
           yield @hash.each_key.lazy.zip(values).to_h
         end
       end
@@ -734,14 +797,20 @@ module Agents
 
     class ResponseFromEventDrop < LiquidDroppable::Drop
       def headers
-        headers = Faraday::Utils::Headers.from(@object.payload[:headers]) rescue {}
+        headers = begin
+          Faraday::Utils::Headers.from(@object.payload[:headers])
+        rescue StandardError
+          {}
+        end
 
         HeaderDrop.new(headers)
       end
 
       # Integer value of HTTP status
       def status
-        Integer(@object.payload[:status]) rescue nil
+        Integer(@object.payload[:status])
+      rescue StandardError
+        nil
       end
 
       # The URL

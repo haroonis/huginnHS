@@ -19,7 +19,7 @@ module LiquidInterpolatable
     # Ignore error (likely due to possibly missing variables on "divided_by")
   rescue Liquid::Error => e
     errors.add(:options, "has an error with Liquid templating: #{e.message}")
-  rescue
+  rescue StandardError
     # Calling `interpolated` without an incoming may naturally fail
     # with various errors when an agent expects one.
   end
@@ -111,7 +111,13 @@ module LiquidInterpolatable
 
   class Context < Liquid::Context
     def initialize(agent)
-      super({}, { '_agent_' => agent }, { agent: agent }, true)
+      outer_scope = { '_agent_' => agent }
+
+      Agents::KeyValueStoreAgent.merge(agent.controllers).find_each do |kvs|
+        outer_scope[kvs.options[:variable]] = kvs.memory
+      end
+
+      super({}, outer_scope, { agent: }, true)
     end
 
     def hash
@@ -130,7 +136,9 @@ module LiquidInterpolatable
     # Percent encoding for URI conforming to RFC 3986.
     # Ref: http://tools.ietf.org/html/rfc3986#page-12
     def uri_escape(string)
-      CGI.escape(string) rescue string
+      CGI.escape(string)
+    rescue StandardError
+      string
     end
 
     # Parse an input into a URI object, optionally resolving it
@@ -171,8 +179,7 @@ module LiquidInterpolatable
 
       http = Faraday.new do |builder|
         builder.adapter :net_http
-        # builder.use FaradayMiddleware::FollowRedirects, limit: limit
-        # ...does not handle non-HTTP URLs.
+        # The follow_redirects middleware does not handle non-HTTP URLs.
       end
 
       limit.times do
@@ -180,6 +187,7 @@ module LiquidInterpolatable
           case uri
           when URI::HTTP
             return uri.to_s unless uri.host
+
             response = http.head(uri)
             case response.status
             when 301, 302, 303, 307
@@ -203,7 +211,9 @@ module LiquidInterpolatable
 
     # Rebase URIs contained in attributes in a given HTML fragment
     def rebase_hrefs(input, base_uri)
-      Utils.rebase_hrefs(input, base_uri) rescue input
+      Utils.rebase_hrefs(input, base_uri)
+    rescue StandardError
+      input
     end
 
     # Unescape (basic) HTML entities in a string
@@ -211,7 +221,9 @@ module LiquidInterpolatable
     # This currently decodes the following entities only: "&apos;",
     # "&quot;", "&lt;", "&gt;", "&amp;", "&#dd;" and "&#xhh;".
     def unescape(input)
-      CGI.unescapeHTML(input) rescue input
+      CGI.unescapeHTML(input)
+    rescue StandardError
+      input
     end
 
     # Escape a string for use in XPath expression
@@ -219,9 +231,9 @@ module LiquidInterpolatable
       subs = string.to_s.scan(/\G(?:\A\z|[^"]+|[^']+)/).map { |x|
         case x
         when /"/
-          %Q{'#{x}'}
+          %('#{x}')
         else
-          %Q{"#{x}"}
+          %("#{x}")
         end
       }
       if subs.size == 1
@@ -229,6 +241,12 @@ module LiquidInterpolatable
       else
         'concat(' << subs.join(', ') << ')'
       end
+    end
+
+    def regex_extract(input, regex, index = 0)
+      input.to_s[Regexp.new(regex), index]
+    rescue IndexError
+      nil
     end
 
     def regex_replace(input, regex, replacement = nil)
@@ -242,6 +260,20 @@ module LiquidInterpolatable
     # Serializes data as JSON
     def json(input)
       JSON.dump(input)
+    end
+
+    def fromjson(input)
+      JSON.parse(input.to_s)
+    rescue StandardError
+      nil
+    end
+
+    def hex_encode(input)
+      input.to_s.unpack1('H*')
+    end
+
+    def hex_decode(input)
+      [input.to_s].pack('H*')
     end
 
     def md5(input)
@@ -361,7 +393,7 @@ module LiquidInterpolatable
         if c = $1
           BACKSLASH + c
         elsif c = ($2 && [$2.to_i(16)].pack('U')) ||
-                  ($3 && [$3.to_i(16)].pack('C'))
+            ($3 && [$3.to_i(16)].pack('C'))
           if c == BACKSLASH
             BACKSLASH + c
           else
@@ -392,9 +424,16 @@ module LiquidInterpolatable
         "\n"
       end
     end
+
+    class Uuidv4 < Liquid::Tag
+      def render(context)
+        SecureRandom.uuid
+      end
+    end
   end
   Liquid::Template.register_tag('credential', LiquidInterpolatable::Tags::Credential)
   Liquid::Template.register_tag('line_break', LiquidInterpolatable::Tags::LineBreak)
+  Liquid::Template.register_tag('uuidv4', LiquidInterpolatable::Tags::Uuidv4)
 
   module Blocks
     # Replace every occurrence of a given regex pattern in the first
@@ -446,8 +485,8 @@ module LiquidInterpolatable
         if more = parse_body(@in_block, tokens)
           @with_block = Liquid::BlockBody.new
           parse_body(@with_block, tokens)
-       end
-     end
+        end
+      end
 
       def nodelist
         if @with_block
@@ -459,6 +498,7 @@ module LiquidInterpolatable
 
       def unknown_tag(tag, markup, tokens)
         return super unless tag == 'with'.freeze
+
         @with_block = Liquid::BlockBody.new
       end
 
@@ -473,6 +513,7 @@ module LiquidInterpolatable
 
         subject.send(first? ? :sub : :gsub, regexp) {
           next '' unless @with_block
+
           m = Regexp.last_match
           context.stack do
             m.names.each do |name|

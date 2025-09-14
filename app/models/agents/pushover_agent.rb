@@ -5,10 +5,9 @@ module Agents
     cannot_create_events!
     no_bulk_receive!
 
-
     API_URL = 'https://api.pushover.net/1/messages.json'
 
-    description <<-MD
+    description <<~MD
       The Pushover Agent receives and collects events and sends them via push notification to a user/group.
 
       **You need a Pushover API Token:** [https://pushover.net/apps/build](https://pushover.net/apps/build)
@@ -31,7 +30,9 @@ module Agents
       * `sound` - the name of one of the sounds supported by device clients to override the user's default sound choice. [See PushOver docs for sound options.](https://pushover.net/api#sounds)
       * `retry` - Required for emergency priority - Specifies how often (in seconds) the Pushover servers will send the same notification to the user. Minimum value: `30`
       * `expire` - Required for emergency priority - Specifies how many seconds your notification will continue to be retried for (every retry seconds). Maximum value: `86400`
+      * `ttl` - set to a Time to Live in seconds
       * `html` - set to `true` to have Pushover's apps display the `message` content as HTML
+      * `monospace` - set to `true` to have Pushover's apps display the `message` content with a monospace font
 
     MD
 
@@ -49,7 +50,9 @@ module Agents
         'sound' => '{{ sound }}',
         'retry' => '{{ retry }}',
         'expire' => '{{ expire }}',
+        'ttl' => '{{ ttl }}',
         'html' => 'false',
+        'monospace' => 'false',
         'expected_receive_period_in_days' => '1'
       }
     end
@@ -87,26 +90,33 @@ module Agents
             sound
             retry
             expire
+            ttl
           ].each do |key|
-            if value = String.try_convert(interpolated[key].presence)
-              case key
-              when 'url'
-                value.slice!(512..-1)
-              when 'url_title'
-                value.slice!(100..-1)
-              end
-              post_params[key] = value
+            value = String.try_convert(interpolated[key].presence) or next
+
+            case key
+            when 'url'
+              value.slice!(512..-1)
+            when 'url_title'
+              value.slice!(100..-1)
             end
+            post_params[key] = value
           end
-          # html is special because String.try_convert(true) gives nil (not even "nil", just nil)
-          if value = interpolated['html'].presence
-            post_params['html'] =
-              case value.to_s
-              when 'true', '1'
-                '1'
-              else
-                '0'
-              end
+
+          # boolean parameters
+          %w[
+            html
+            monospace
+          ].each do |key|
+            if value = interpolated[key].presence
+              post_params[key] =
+                case value.to_s
+                when 'true', '1'
+                  '1'
+                else
+                  '0'
+                end
+            end
           end
 
           send_notification(post_params)
