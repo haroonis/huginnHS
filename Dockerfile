@@ -2,17 +2,12 @@ FROM ruby:3.2-slim
 
 # Install Ruby, RubyGems, Bundler, and dependencies
 RUN apt-get update && apt-get install -y \
-  apt-transport-https \
-  ca-certificates \
-  software-properties-common \
   build-essential \
   libpq-dev \
   nodejs \
   curl \
   gnupg \
-  && curl -fsSL https://dl.yarnpkg.com/debian/pubkey.gpg | gpg --dearmor -o /usr/share/keyrings/yarn.gpg \
-  && echo "deb [signed-by=/usr/share/keyrings/yarn.gpg] https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list \
-  && apt-get update && apt-get install -y yarn \
+  && corepack enable \
   && rm -rf /var/lib/apt/lists/*
 
 
