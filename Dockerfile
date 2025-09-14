@@ -1,11 +1,15 @@
-FROM ruby:3.2-slim-bookworm
+FROM ruby:3.2-bookworm
 
-# Environment setup
+# Set environment variables
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    RAILS_ENV=production \
+    APP_SECRET_TOKEN=secret \
+    DATABASE_ADAPTER=mysql2 \
+    ON_HEROKU=true
 
-# Install system dependencies
+# Install essential system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -25,47 +29,48 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     locales \
     tzdata \
-    shared-mime-info \
-    iputils-ping \
+    nodejs \
  && rm -rf /var/lib/apt/lists/*
 
-# Enable Corepack (for Yarn/PNPM)
+# Enable Corepack for Yarn
 RUN corepack enable
 
-# Prepare Huginn build environment
+# Copy and run Huginn prepare script
 COPY docker/scripts/prepare /scripts/
 RUN sed -i 's/git-core/git/' /scripts/prepare \
  && sed -i 's/apt-get purge -y python3\*/# removed python3 purge/' /scripts/prepare \
  && /scripts/prepare
 
+# Copy and run standalone packages script
 COPY docker/multi-process/scripts/standalone-packages /scripts/
 RUN /scripts/standalone-packages
 
+# Set working directory
 WORKDIR /app
 
-# Install Ruby gems
+# Copy Ruby dependencies
 COPY ["Gemfile", "Gemfile.lock", "/app/"]
 COPY lib/gemfile_helper.rb /app/lib/
 COPY vendor/gems/ /app/vendor/gems/
 
+# Install Ruby gems
 RUN umask 002 && git init && \
-    export RAILS_ENV=production APP_SECRET_TOKEN=secret DATABASE_ADAPTER=mysql2 ON_HEROKU=true && \
     bundle config set --local path vendor/bundle && \
     bundle config set --local without 'test development' && \
     bundle install -j 4
 
-# Copy full app
+# Copy full Huginn application
 COPY ./ /app/
 
 ARG OUTDATED_DOCKER_IMAGE_NAMESPACE=false
-ENV OUTDATED_DOCKER_IMAGE_NAMESPACE ${OUTDATED_DOCKER_IMAGE_NAMESPACE}
+ENV OUTDATED_DOCKER_IMAGE_NAMESPACE=${OUTDATED_DOCKER_IMAGE_NAMESPACE}
 
 # Precompile assets
 RUN umask 002 && \
-    RAILS_ENV=production APP_SECRET_TOKEN=secret DATABASE_ADAPTER=mysql2 ON_HEROKU=true \
     bundle exec rake assets:clean assets:precompile && \
     chmod g=u /app/.env.example /app/Gemfile.lock /app/config/ /app/tmp/
 
+# Expose Rails port
 EXPOSE 3000
 
 # Supervisor configs
@@ -80,11 +85,11 @@ COPY ["docker/multi-process/scripts/bootstrap.sh", \
 
 CMD ["/scripts/init"]
 
-# Non-root user
+# Create non-root user
 ARG UID=1001
 RUN useradd -u "$UID" -g 0 -d /app -s /sbin/nologin -c "default user" default
-
 USER $UID
-ENV HOME /app
+ENV HOME=/app
 
+# Persistent MySQL volume
 VOLUME /var/lib/mysql
