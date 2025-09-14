@@ -1,4 +1,4 @@
-FROM ruby:3.2-bookworm
+FROM ruby:3.2-slim-bookworm
 
 # Set environment variables
 ENV LANG=C.UTF-8 \
